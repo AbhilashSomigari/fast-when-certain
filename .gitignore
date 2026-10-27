@@ -1,0 +1,14 @@
+# local-only notes
+CLAUDE.md
+
+# recordings and their CSV exports are too big for git
+bags/
+*_csv/
+*.db3
+
+# colcon / python build output
+build/
+install/
+log/
+__pycache__/
+*.pyc

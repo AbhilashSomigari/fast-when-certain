@@ -28,7 +28,7 @@ If the CUDA build fails, install the CPU version (`sudo python3 setup.py install
 **2. Clone and build**
 
 ```bash
-cd ~/f1tenth_ws/src && git clone <this repo's URL> fast-when-certain
+cd ~/f1tenth_ws/src && git clone https://github.com/AbhilashSomigari/fast-when-certain.git
 cd ~/f1tenth_ws && colcon build --packages-select fwc_pf && source install/setup.bash
 ```
 

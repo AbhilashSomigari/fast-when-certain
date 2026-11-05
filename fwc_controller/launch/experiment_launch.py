@@ -9,9 +9,15 @@ Args:
                speed = confidence-aware speed and lookahead in the controller
   speed_scale  multiplies the whole speed profile
   sim          true in the f1tenth_gym sim: odometry from /ego_racecar/odom,
-               levine waypoints, the sim's own map server, CPU ray casting
+               levine map and waypoints, the sim's own map server
   waypoints    waypoint file in fwc_controller/waypoints (default track.csv,
                levine.csv when sim:=true)
+  particles    overrides max_particles (empty = localize.yaml)
+  noise_speed_gain
+               overrides k of the noise configs (empty = experiment.yaml)
+  replay       true = filter + map server only, for scripts/replay.sh; the
+               filter's outputs move to /replay/pf/... so they don't mix with
+               the /pf/... messages played back from the bag
 
 Values come from fwc_pf/config/localize.yaml, then config/experiment.yaml;
 the config arg only switches noise_speed_gain and adaptive_speed on or off.
@@ -33,13 +39,18 @@ CONFIGS = {
     'speed': (False, True),
     'both': (True, True),
 }
+REPLAY_TOPICS = ['/pf/pose/odom', '/pf/stats', '/pf/confidence']
 
 
 def launch_setup(context):
-    config = LaunchConfiguration('config').perform(context)
-    speed_scale = float(LaunchConfiguration('speed_scale').perform(context))
-    sim = LaunchConfiguration('sim').perform(context).lower() == 'true'
-    waypoints = LaunchConfiguration('waypoints').perform(context)
+    def arg(name):
+        return LaunchConfiguration(name).perform(context)
+
+    config = arg('config')
+    speed_scale = float(arg('speed_scale'))
+    sim = arg('sim').lower() == 'true'
+    replay = arg('replay').lower() == 'true'
+    waypoints = arg('waypoints')
     if config not in CONFIGS:
         raise RuntimeError('config must be one of ' + ', '.join(CONFIGS))
     adaptive_noise, adaptive_speed = CONFIGS[config]
@@ -55,10 +66,12 @@ def launch_setup(context):
     pf_overrides = {}
     if not adaptive_noise:
         pf_overrides['noise_speed_gain'] = 0.0
+    elif arg('noise_speed_gain'):
+        pf_overrides['noise_speed_gain'] = float(arg('noise_speed_gain'))
+    if arg('particles'):
+        pf_overrides['max_particles'] = int(arg('particles'))
     if sim:
-        # the VM has no GPU: CPU ray casting with fewer particles
-        pf_overrides.update({'odometry_topic': '/ego_racecar/odom',
-                             'range_method': 'cddt', 'max_particles': 2000})
+        pf_overrides['odometry_topic'] = '/ego_racecar/odom'
 
     actions = [
         Node(
@@ -67,8 +80,12 @@ def launch_setup(context):
             name='particle_filter',
             output='screen',
             parameters=[localize, experiment, pf_overrides],
+            remappings=([(t, '/replay' + t) for t in REPLAY_TOPICS]
+                        if replay else []),
         ),
-        Node(
+    ]
+    if not replay:
+        actions.append(Node(
             package='fwc_controller',
             executable='controller',
             name='controller',
@@ -78,14 +95,13 @@ def launch_setup(context):
                 'adaptive_speed': adaptive_speed,
                 'waypoints': waypoints,
             }],
-        ),
-    ]
+        ))
 
-    # On the car the map comes from our map server; the sim runs its own.
-    if not sim:
+    # The live sim runs its own map server; everywhere else we start one.
+    if replay or not sim:
         with open(localize) as f:
             map_params = yaml.safe_load(f)['map_server']['ros__parameters']
-        map_name = map_params['map']
+        map_name = 'levine' if sim else map_params['map']
         actions += [
             Node(
                 package='nav2_map_server',
@@ -114,5 +130,8 @@ def generate_launch_description():
         DeclareLaunchArgument('speed_scale', default_value='0.4'),
         DeclareLaunchArgument('sim', default_value='false'),
         DeclareLaunchArgument('waypoints', default_value=''),
+        DeclareLaunchArgument('particles', default_value=''),
+        DeclareLaunchArgument('noise_speed_gain', default_value=''),
+        DeclareLaunchArgument('replay', default_value='false'),
         OpaqueFunction(function=launch_setup),
     ])

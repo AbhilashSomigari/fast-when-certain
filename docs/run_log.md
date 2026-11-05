@@ -9,7 +9,7 @@ A lap fails if any of these happen during it:
 - the car touches a wall (not in the bag: count it in Notes as `wall`)
 
 `analysis/summarize.py` finds the first two. Hand driving that starts from standstill, such as
-driving to the markers after the last lap, is not a takeover.
+driving back onto the start mark after the last lap, is not a takeover.
 
 ## Runs
 
@@ -20,21 +20,12 @@ One row per bag, filled in the same day. Bag names: `<config>_s<speed_scale>`, e
 | --- | --- | --- | --- | --- | --- | --- | --- |
 |  |  |  |  |  |  |  |  |
 
-## Floor markers
+## Settings found
 
-Map-frame positions, read from `/pf/pose/odom` after parking 10 s on each marker.
-
-| Marker | Where | x (m) | y (m) |
-| --- | --- | --- | --- |
-| M1 | straight |  |  |
-| M2 | straight |  |  |
-| M3 | corner |  |  |
-| M4 | corner |  |  |
-
-## Calibration
-
-| Parameter | Before | After |
+| What | Value | From |
 | --- | --- | --- |
-| speed_to_erpm_gain |  |  |
-| steering_angle_to_servo_offset |  |  |
-| steering_angle_to_servo_gain |  |  |
+| Test speed S* (speed_scale) |  | baseline sweep, session 1 |
+| max_particles | 2000 | 1000 if the baseline never failed |
+| confidence_signal, conf_low, conf_high |  | summarize.py --signals |
+| conf_min_speed |  | sweep |
+| noise_speed_gain (k) |  | replay.sh, or 0.5 if replay didn't work |

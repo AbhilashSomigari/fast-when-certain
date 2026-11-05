@@ -5,13 +5,14 @@ particle_filter:
     odometry_topic: '/odom'
     # range data downsampling
     angle_step: 18
-    max_particles: 4000
+    max_particles: 2000
     squash_factor: 2.2
     # visualization
     viz: 1
     max_viz_particles: 60
-    # ray marching method
-    range_method: 'rmgpu'
+    # ray casting method: 'cddt' runs on the CPU (no CUDA build needed);
+    # 'rmgpu' is faster but needs range_libc built WITH_CUDA=ON
+    range_method: 'cddt'
     theta_discretization: 112
     # range data filtering
     max_range: 10
@@ -27,7 +28,7 @@ particle_filter:
     motion_dispersion_x: 0.05
     motion_dispersion_y: 0.025
     motion_dispersion_theta: 0.25
-    # sensor model variant, variant 2 good for rmgpu, 3 doesn't work for rmgpu
+    # sensor model variant, variant 2 works for cddt and rmgpu, 3 doesn't work for rmgpu
     rangelib_variant: 2
 
 map_server:

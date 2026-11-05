@@ -40,6 +40,9 @@ TOPICS = {
     '/drive': ('drive.csv', ['speed', 'steer'], drive_row),
     '/teleop': ('teleop.csv', ['speed', 'steer'], drive_row),
 }
+# scripts/replay.sh records the filter's outputs under /replay/...; write them to the same files
+for _topic in ['/pf/pose/odom', '/pf/stats', '/pf/confidence']:
+    TOPICS['/replay' + _topic] = TOPICS[_topic]
 
 
 def main():

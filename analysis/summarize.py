@@ -10,6 +10,7 @@ Usage:
   csv_dir       - output of scripts/bag_to_csv.py. The bag name gives the config and
                   speed: it must contain baseline|noise|speed|both and _s<speed_scale>,
                   e.g. 1112_1530_baseline_s0.5 or 1118_1000_final_both_s0.6.
+                  Output of scripts/replay.sh (..._replay_k<k>) is grouped by k instead.
 
 Default mode prints one row per bag and per (config, speed), writes results.csv and
 failure_rate.png next to the first csv_dir.
@@ -21,11 +22,13 @@ Rules (match docs/run_log.md):
   lap       - one pass of the raceline index from start to end (the raceline starts at
               the start mark); a clean lap with hand driving in it is not counted
   failure   - a lap with a takeover (a /teleop burst that starts while the car moves
-              faster than TAKEOVER_SPEED; driving to the markers after the last lap starts
+              faster than TAKEOVER_SPEED; driving back to the start after the last lap starts
               from standstill, so it does not count) or a filter pose jump > JUMP_M.
               Wall touches are not in the bag: add them from the run log by hand.
-  marker    - a stop of >= STOP_S within MARKER_RADIUS of a marker from docs/run_log.md
+  marker    - (optional) a stop of >= STOP_S within MARKER_RADIUS of a marker listed in a
+              Floor markers table in docs/run_log.md; none listed = no marker error
   closure   - distance between the filter pose at the first and last stop on the start mark
+  spread    - mean particle spread (m) during laps; compares noise gains k in replays
 """
 
 import csv
@@ -72,6 +75,9 @@ def parse_name(csv_dir):
     configs = [c for c in CONFIGS if re.search(r'(^|_)%s(_|$)' % c, name.replace('_csv', ''))]
     speed = re.search(r'_s(\d+(?:\.\d+)?)', name)
     config = configs[0] if len(configs) == 1 else '?'
+    replay = re.search(r'_replay_k(\d+(?:\.\d+)?)', name)
+    if replay:
+        config = 'k=' + replay.group(1)
     return name, config, (float(speed.group(1)) if speed else np.nan)
 
 
@@ -190,6 +196,15 @@ def summarize_bag(path, csv_dir, markers):
     for a, b, _, _ in lap_list:
         in_laps |= (pose['t'] >= a) & (pose['t'] < b)
 
+    stats = read_csv(csv_dir, 'stats.csv')
+    spread = np.nan
+    if stats is not None:
+        in_laps_stats = np.zeros(len(stats), dtype=bool)
+        for a, b, _, _ in lap_list:
+            in_laps_stats |= (stats['t'] >= a) & (stats['t'] < b)
+        if in_laps_stats.any():
+            spread = float(np.mean(stats['spread'][in_laps_stats]))
+
     stop_list = stops(pose)
     marker_err = []
     for _, _, x, y in stop_list:
@@ -211,6 +226,7 @@ def summarize_bag(path, csv_dir, markers):
         'lap_time': float(np.median(times)) if times else np.nan,
         'xte_mean': float(np.mean(xte[in_laps])) if in_laps.any() else np.nan,
         'xte_max': float(np.max(xte[in_laps])) if in_laps.any() else np.nan,
+        'spread': spread,
         'marker_err': float(np.mean(marker_err)) if marker_err else np.nan,
         'closure': float(closure),
         '_events': events, '_laps': lap_list,
@@ -234,7 +250,7 @@ def results(path, csv_dirs):
     markers = read_markers()
     rows = [r for r in (summarize_bag(path, d, markers) for d in csv_dirs) if r]
     cols = ['bag', 'config', 'speed_scale', 'laps', 'failed', 'takeovers', 'jumps',
-            'lap_time', 'xte_mean', 'xte_max', 'marker_err', 'closure']
+            'lap_time', 'xte_mean', 'xte_max', 'spread', 'marker_err', 'closure']
     print('Per bag (failures from the bag only; add wall touches from the run log):')
     print_table(rows, cols)
 
@@ -251,12 +267,13 @@ def results(path, csv_dirs):
             'failure_rate': f / n if n else np.nan,
             'lap_time': float(np.nanmedian([r['lap_time'] for r in rs])),
             'xte_mean': float(np.nanmean([r['xte_mean'] for r in rs])),
+            'spread': float(np.nanmean([r['spread'] for r in rs])),
             'marker_err': float(np.nanmean([r['marker_err'] for r in rs])),
             'closure': float(np.nanmean([r['closure'] for r in rs])),
         })
     print('\nPer config and speed:')
     out_cols = ['config', 'speed_scale', 'laps', 'failed', 'failure_rate',
-                'lap_time', 'xte_mean', 'marker_err', 'closure']
+                'lap_time', 'xte_mean', 'spread', 'marker_err', 'closure']
     print_table(pooled, out_cols)
 
     out_dir = os.path.dirname(os.path.abspath(csv_dirs[0].rstrip('/')))
@@ -283,7 +300,8 @@ def results(path, csv_dirs):
     ax.grid(alpha=0.25)
     for side in ('top', 'right'):
         ax.spines[side].set_visible(False)
-    ax.legend(frameon=False)
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(frameon=False)
     ax.set_title('Failure rate vs speed', loc='left')
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, 'failure_rate.png'), dpi=150)

@@ -5,11 +5,16 @@ Uncertainty-aware speed control for an F1TENTH car. The particle filter reports 
 ## Repository layout
 
 ```
-fwc_pf/       particle filter (ROS 2 package), from f1tenth/particle_filter foxy-devel, plus /pf/stats
-  maps/       track map goes here (track.pgm + track.yaml); levine is the sim map
-scripts/      record.sh (record a run), bag_to_csv.py (bag -> CSV files)
-analysis/     plot_run.py (path on map + confidence signals)
-docs/         run_log.md
+fwc_pf/          particle filter (ROS 2 package), from f1tenth/particle_filter foxy-devel,
+                 plus /pf/stats, /pf/confidence and speed-scaled motion noise
+  maps/          track map goes here (track.pgm + track.yaml); levine is the sim map
+fwc_controller/  pure pursuit with confidence-aware speed (from my Lab 4 node) and
+                 the experiment launch file
+  config/        experiment.yaml: all tuned values
+  waypoints/     raceline: track.csv (car), levine.csv (sim)
+scripts/         record.sh (record a run), bag_to_csv.py (bag -> CSV files)
+analysis/        plot_run.py (one run on the map), summarize.py (laps, failures, results)
+docs/            run_log.md
 ```
 
 ## Setup on the car (ROS 2 Foxy)
@@ -29,7 +34,7 @@ If the CUDA build fails, install the CPU version (`sudo python3 setup.py install
 
 ```bash
 cd ~/f1tenth_ws/src && git clone https://github.com/AbhilashSomigari/fast-when-certain.git
-cd ~/f1tenth_ws && colcon build --packages-select fwc_pf && source install/setup.bash
+cd ~/f1tenth_ws && colcon build --packages-select fwc_pf fwc_controller && source install/setup.bash
 ```
 
 **3. Map the track**
@@ -43,6 +48,9 @@ ros2 run nav2_map_server map_saver_cli -f ~/f1tenth_ws/src/fast-when-certain/fwc
 ```
 
 Stop SLAM, rebuild `fwc_pf` so the map gets installed, then commit and push `fwc_pf/maps/track.*`.
+Then drive 2 slow, smooth laps from the start mark while recording (step 5), and copy that
+bag's `pose.csv` to `fwc_controller/waypoints/track.csv`. The controller cuts it to one lap
+and smooths it.
 
 **4. Localize**
 
@@ -67,6 +75,24 @@ python3 scripts/bag_to_csv.py ~/bags/<bag name>    # writes ~/bags/<bag name>_cs
 python3 analysis/plot_run.py ~/bags/<bag name>_csv fwc_pf/maps/track.yaml
 ```
 
+**6. Run an experiment**
+
+```bash
+ros2 launch f1tenth_stack bringup_launch.py
+ros2 launch fwc_controller experiment_launch.py config:=baseline speed_scale:=0.4
+```
+
+`config` is `baseline`, `noise` (speed-scaled motion noise in the filter), `speed`
+(confidence-aware speed and lookahead) or `both`. Set the pose in RViz, then hold RB.
+In the sim, add `sim:=true` (levine map and raceline, `/ego_racecar/odom`).
+
+Name each recording after its config and speed, e.g. `./scripts/record.sh baseline_s0.4`, then:
+
+```bash
+python3 analysis/summarize.py fwc_controller/waypoints/track.csv ~/bags/*_csv            # results
+python3 analysis/summarize.py --signals fwc_controller/waypoints/track.csv ~/bags/*_csv  # pick the signal
+```
+
 ## Confidence signals (`/pf/stats`)
 
 | Index | Name | Meaning |
@@ -74,3 +100,6 @@ python3 analysis/plot_run.py ~/bags/<bag name>_csv fwc_pf/maps/track.yaml
 | 0 | spread | Weighted std of particle positions (m). Grows when the filter is unsure. |
 | 1 | ess | Effective sample size ÷ number of particles (0–1). Low when few particles explain the scan. |
 | 2 | match | Log of the mean unnormalized particle weight. Low when the scan fits the map poorly. |
+
+`/pf/confidence` (0–1) is one of these, chosen by `confidence_signal` and mapped linearly
+between `conf_low` and `conf_high` in `fwc_controller/config/experiment.yaml`.

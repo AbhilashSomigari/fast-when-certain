@@ -1,0 +1,35 @@
+# Tuned values for the experiments; the launch file loads this on top of
+# fwc_pf/config/localize.yaml and turns the adaptations on per config.
+# Freeze = tag the repo once these are final.
+
+particle_filter:
+  ros__parameters:
+    # confidence: which /pf/stats signal, mapped linearly to 0..1 between
+    # conf_low and conf_high (spread is inverted: small spread = confident)
+    confidence_signal: 'spread'   # spread | ess | match
+    conf_low: 0.05
+    conf_high: 0.30
+    conf_alpha: 0.3               # EMA weight of each new value
+    # adaptive noise (configs noise, both): dispersion x (1 + k |v|)
+    noise_speed_gain: 0.5
+
+controller:
+  ros__parameters:
+    # pure pursuit (Lab 4 values)
+    waypoint_spacing: 0.05
+    smoothing_window: 9
+    search_window: 100
+    lookahead_distance: 0.9
+    lookahead_speed_gain: 0.05
+    wheelbase: 0.3302
+    max_steering: 0.4189
+    # speed profile, multiplied by the launch arg speed_scale
+    max_speed: 5.0
+    min_speed: 1.5
+    max_lateral_accel: 5.0
+    max_decel: 5.0
+    # confidence-aware speed (configs speed, both)
+    conf_min_speed: 0.8           # speed at confidence 0 (m/s)
+    conf_rise_rate: 0.5           # confidence may rise this much per second
+    conf_timeout: 0.5             # older confidence counts as 0 (s)
+    lookahead_conf_gain: 0.3      # extra lookahead at confidence 0 (m)

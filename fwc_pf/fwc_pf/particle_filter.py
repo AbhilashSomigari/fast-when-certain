@@ -38,7 +38,7 @@ from tf2_ros import TransformBroadcaster
 import tf_transformations
 
 # messages
-from std_msgs.msg import String, Header, Float32MultiArray
+from std_msgs.msg import String, Header, Float32, Float32MultiArray
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped, TransformStamped
@@ -85,6 +85,11 @@ class ParticleFiler(Node):
         self.declare_parameter('motion_dispersion_theta')
         self.declare_parameter('scan_topic')
         self.declare_parameter('odometry_topic')
+        self.declare_parameter('confidence_signal', 'spread')
+        self.declare_parameter('conf_low', 0.05)
+        self.declare_parameter('conf_high', 0.30)
+        self.declare_parameter('conf_alpha', 0.3)
+        self.declare_parameter('noise_speed_gain', 0.0)
 
         # parameters
         self.ANGLE_STEP           = self.get_parameter('angle_step').value
@@ -110,6 +115,16 @@ class ParticleFiler(Node):
         self.MOTION_DISPERSION_X     = self.get_parameter('motion_dispersion_x').value
         self.MOTION_DISPERSION_Y     = self.get_parameter('motion_dispersion_y').value
         self.MOTION_DISPERSION_THETA = self.get_parameter('motion_dispersion_theta').value
+        # adaptive noise: dispersion is scaled by (1 + NOISE_SPEED_GAIN * |speed|), 0 = off
+        self.NOISE_SPEED_GAIN        = self.get_parameter('noise_speed_gain').value
+
+        # confidence: one /pf/stats signal mapped linearly to 0..1 between CONF_LOW and CONF_HIGH
+        self.CONF_SIGNAL = self.get_parameter('confidence_signal').value
+        self.CONF_LOW    = self.get_parameter('conf_low').value
+        self.CONF_HIGH   = self.get_parameter('conf_high').value
+        self.CONF_ALPHA  = self.get_parameter('conf_alpha').value
+        if self.CONF_SIGNAL not in ('spread', 'ess', 'match') or self.CONF_HIGH == self.CONF_LOW:
+            raise ValueError('confidence_signal must be spread, ess or match, and conf_low != conf_high')
         
         # various data containers used in the MCL algorithm
         self.MAX_RANGE_PX = None
@@ -146,6 +161,8 @@ class ParticleFiler(Node):
 
         # scan-to-map match score of the latest update (see compute_stats)
         self.match_score = 0.0
+        # smoothed confidence (see compute_confidence); starts unsure
+        self.confidence = 0.0
 
         # initialize the state
         self.smoothing = Utils.CircularArray(10)
@@ -171,6 +188,8 @@ class ParticleFiler(Node):
 
         # candidate confidence signals [spread, ess, match], see compute_stats
         self.stats_pub = self.create_publisher(Float32MultiArray, '/pf/stats', 1)
+        # the chosen signal as a 0..1 confidence, used by the controller
+        self.confidence_pub = self.create_publisher(Float32, '/pf/confidence', 1)
 
         # these topics are for coordinate space things
         self.pub_tf = TransformBroadcaster(self)
@@ -498,10 +517,13 @@ class ParticleFiler(Node):
         self.local_deltas[:,1] = sines*action[0] + cosines*action[1]
         self.local_deltas[:,2] = action[2]
 
+        # more noise at speed, where wheel slip makes odometry worse (NOISE_SPEED_GAIN = 0: fixed noise)
+        scale = 1.0 + self.NOISE_SPEED_GAIN * abs(self.current_speed)
+
         proposal_dist[:,:] += self.local_deltas
-        proposal_dist[:,0] += np.random.normal(loc=0.0,scale=self.MOTION_DISPERSION_X,size=self.MAX_PARTICLES)
-        proposal_dist[:,1] += np.random.normal(loc=0.0,scale=self.MOTION_DISPERSION_Y,size=self.MAX_PARTICLES)
-        proposal_dist[:,2] += np.random.normal(loc=0.0,scale=self.MOTION_DISPERSION_THETA,size=self.MAX_PARTICLES)
+        proposal_dist[:,0] += np.random.normal(loc=0.0,scale=scale*self.MOTION_DISPERSION_X,size=self.MAX_PARTICLES)
+        proposal_dist[:,1] += np.random.normal(loc=0.0,scale=scale*self.MOTION_DISPERSION_Y,size=self.MAX_PARTICLES)
+        proposal_dist[:,2] += np.random.normal(loc=0.0,scale=scale*self.MOTION_DISPERSION_THETA,size=self.MAX_PARTICLES)
 
     def sensor_model(self, proposal_dist, obs, weights):
         '''
@@ -668,6 +690,20 @@ class ParticleFiler(Node):
         ess = 1.0 / np.sum(self.weights**2) / self.MAX_PARTICLES
         return [float(spread), float(ess), self.match_score]
 
+    def compute_confidence(self, stats):
+        '''
+        Map the chosen signal of [spread, ess, match] to a confidence in 0..1, linear between
+        conf_low and conf_high (inverted for spread, where small = confident), then smooth it
+        with an exponential moving average.
+        '''
+        value = stats[('spread', 'ess', 'match').index(self.CONF_SIGNAL)]
+        c = (value - self.CONF_LOW) / (self.CONF_HIGH - self.CONF_LOW)
+        if self.CONF_SIGNAL == 'spread':
+            c = 1.0 - c
+        c = min(max(c, 0.0), 1.0)
+        self.confidence += self.CONF_ALPHA * (c - self.confidence)
+        return self.confidence
+
     def update(self):
         '''
         Apply the MCL function to update particle filter state. 
@@ -693,12 +729,14 @@ class ParticleFiler(Node):
                 # compute the expected value of the robot pose
                 self.inferred_pose = self.expected_pose()
                 stats = self.compute_stats()
+                confidence = self.compute_confidence(stats)
                 self.state_lock.release()
                 t2 = time.time()
 
                 # publish transformation frame based on inferred pose
                 self.publish_tf(self.inferred_pose, self.last_stamp)
                 self.stats_pub.publish(Float32MultiArray(data=stats))
+                self.confidence_pub.publish(Float32(data=float(confidence)))
 
                 # this is for tracking particle filter speed
                 ips = 1.0 / (t2 - t1)

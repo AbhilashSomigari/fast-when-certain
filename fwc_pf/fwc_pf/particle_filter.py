@@ -420,6 +420,9 @@ class ParticleFiler(Node):
         self.particles[:,0] = pose.position.x + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
         self.particles[:,1] = pose.position.y + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
         self.particles[:,2] = Utils.quaternion_to_angle(pose.orientation) + np.random.normal(loc=0.0,scale=0.4,size=self.MAX_PARTICLES)
+        # re-anchor odometry: the sim teleports the car on /initialpose, and that jump
+        # must not be applied to the new particles as motion
+        self.last_pose = None
         self.state_lock.release()
 
     def initialize_global(self):
@@ -440,6 +443,7 @@ class ParticleFiler(Node):
         Utils.map_to_world(permissible_states, self.map_info)
         self.particles = permissible_states
         self.weights[:] = 1.0 / self.MAX_PARTICLES
+        self.last_pose = None
         self.state_lock.release()
 
     def precompute_sensor_model(self):

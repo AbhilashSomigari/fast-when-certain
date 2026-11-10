@@ -42,6 +42,12 @@ CONFIGS = {
 REPLAY_TOPICS = ['/pf/pose/odom', '/pf/stats', '/pf/confidence']
 
 
+def node_params(path, node):
+    """The ros__parameters of one node in a parameter yaml file."""
+    with open(path) as f:
+        return yaml.safe_load(f).get(node, {}).get('ros__parameters', {})
+
+
 def launch_setup(context):
     def arg(name):
         return LaunchConfiguration(name).perform(context)
@@ -72,6 +78,11 @@ def launch_setup(context):
         pf_overrides['max_particles'] = int(arg('particles'))
     if sim:
         pf_overrides['odometry_topic'] = '/ego_racecar/odom'
+    # One merged dict: on Foxy, values from a yaml file that names the node
+    # win over a dict passed after it, so the overrides would be ignored.
+    pf_params = {**node_params(localize, 'particle_filter'),
+                 **node_params(experiment, 'particle_filter'),
+                 **pf_overrides}
 
     actions = [
         Node(
@@ -79,7 +90,7 @@ def launch_setup(context):
             executable='particle_filter',
             name='particle_filter',
             output='screen',
-            parameters=[localize, experiment, pf_overrides],
+            parameters=[pf_params],
             remappings=([(t, '/replay' + t) for t in REPLAY_TOPICS]
                         if replay else []),
         ),
@@ -90,7 +101,8 @@ def launch_setup(context):
             executable='controller',
             name='controller',
             output='screen',
-            parameters=[experiment, {
+            parameters=[{
+                **node_params(experiment, 'controller'),
                 'speed_scale': speed_scale,
                 'adaptive_speed': adaptive_speed,
                 'waypoints': waypoints,

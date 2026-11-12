@@ -4,11 +4,12 @@
 
 particle_filter:
   ros__parameters:
-    # confidence: which /pf/stats signal, mapped linearly to 0..1 between
-    # conf_low and conf_high (spread is inverted: small spread = confident)
-    confidence_signal: 'spread'   # spread | ess | match
-    conf_low: 0.05
-    conf_high: 0.30
+    # confidence: scan inlier ratio (fraction of beams within
+    # inlier_threshold of the map at the pose), mapped linearly to 0..1
+    # between conf_low and conf_high; sim defaults, set from car bags
+    inlier_threshold: 0.2         # m
+    conf_low: 0.7
+    conf_high: 0.95
     conf_alpha: 0.3               # EMA weight of each new value
     # adaptive noise (configs noise, both): dispersion x (1 + k |v|)
     noise_speed_gain: 0.5

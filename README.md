@@ -5,17 +5,29 @@ Uncertainty-aware speed control for an F1TENTH car. The particle filter reports 
 ## Repository layout
 
 ```
-fwc_pf/          particle filter (ROS 2 package), from f1tenth/particle_filter foxy-devel,
-                 plus /pf/stats, /pf/confidence and speed-scaled motion noise
+fwc_pf/          particle filter (ROS 2 package): the f1tenth/particle_filter math in a
+                 ROS-free core (mcl.py) with a thin node, plus /pf/stats, /pf/confidence
+                 and speed-scaled motion noise
   maps/          track map goes here (track.pgm + track.yaml); levine is the sim map
 fwc_controller/  pure pursuit with confidence-aware speed (from my Lab 4 node) and
                  the experiment launch file
   config/        experiment.yaml: all tuned values
   waypoints/     raceline: track.csv (car), levine.csv (sim)
-scripts/         car_setup.sh (install + build), record.sh (record a run),
-                 bag_to_csv.py (bag -> CSV files), replay.sh (rerun the filter on a bag)
+scripts/         car_setup.sh (install + build), record.sh (record a run), monitor.py
+                 (filter health once a second), bag_to_csv.py (bag -> CSV files),
+                 replay.sh (rerun the filter on a bag)
 analysis/        plot_run.py (one run on the map), summarize.py (laps, failures, results)
 docs/            run_log.md
+tests/           pytest on a laptop, no ROS: a 2D simulator (sim2d.py) drives the real
+                 filter and controller code in closed loop; fake_ros.py runs the two
+                 nodes and the launch file's parameter setup against it
+```
+
+## Tests (no ROS needed)
+
+```bash
+python3 -m venv ~/fwc-venv && ~/fwc-venv/bin/pip install numpy scipy matplotlib pyyaml pytest
+~/fwc-venv/bin/python -m pytest tests          # about 4 minutes; -s prints a line per run
 ```
 
 ## Setup on the car (ROS 2 Foxy)
@@ -58,9 +70,9 @@ Start a recording first (step 4) if you want to replay it later, then click **2D
 on the car's real spot, and drive slowly. Checks:
 
 - `ros2 topic hz /pf/pose/odom`: about 30 Hz or more
-- `ros2 topic echo /pf/stats`: `[spread, ess, match]`, with spread a few cm when localized
+- `python3 scripts/monitor.py`: inlier ratio steady and high, confidence near 1 when localized
 
-The filter publishes TF `map → laser` (upstream behavior). If the scan flickers in RViz, that's this TF, not the estimate. `/pf/pose/odom` is unaffected, and it's what the project uses.
+The filter publishes TF `map → pf_laser` (its own frame, so the car's TF tree is untouched) and the scan in that frame on `/pf/viz/scan`: in RViz the scan should sit on the map's walls.
 
 **4. Record, convert, plot**
 
@@ -86,7 +98,7 @@ Name each recording after its config and speed, e.g. `./scripts/record.sh baseli
 
 ```bash
 python3 analysis/summarize.py fwc_controller/waypoints/track.csv ~/bags/*_csv            # results
-python3 analysis/summarize.py --signals fwc_controller/waypoints/track.csv ~/bags/*_csv  # pick the signal
+python3 analysis/summarize.py --signals fwc_controller/waypoints/track.csv ~/bags/*_csv  # conf_low/high
 ```
 
 **6. Tune the noise gain by replay** (VM, no car): run a recorded bag through the filter again with
@@ -100,13 +112,16 @@ python3 analysis/summarize.py fwc_controller/waypoints/track.csv ~/bags/*_replay
 
 Fewer pose jumps (and, on a tie, lower mean spread) is better.
 
-## Confidence signals (`/pf/stats`)
+## Confidence (`/pf/stats`, `/pf/confidence`)
 
 | Index | Name | Meaning |
 | --- | --- | --- |
-| 0 | spread | Weighted std of particle positions (m). Grows when the filter is unsure. |
-| 1 | ess | Effective sample size ÷ number of particles (0–1). Low when few particles explain the scan. |
-| 2 | match | Log of the mean unnormalized particle weight. Low when the scan fits the map poorly. |
+| 0 | inlier | Fraction of lidar beams within `inlier_threshold` (0.2 m) of the range ray cast from the map at the filter's pose. Low when the scan doesn't fit the map there. |
+| 1 | spread | Weighted std of particle positions (m). |
+| 2 | ess | Effective sample size ÷ number of particles (0–1). |
 
-`/pf/confidence` (0–1) is one of these, chosen by `confidence_signal` and mapped linearly
-between `conf_low` and `conf_high` in `fwc_controller/config/experiment.yaml`.
+`/pf/confidence` (0–1) is the inlier ratio mapped linearly between `conf_low` and `conf_high`
+in `fwc_controller/config/experiment.yaml`, then smoothed. It uses the inlier ratio because
+it looks only at the pose, not at the particle cloud: the adaptive motion noise widens the
+cloud (and the spread) by itself, which would make a spread-based confidence slow the car
+down for no reason. Spread and ESS are recorded for comparison.

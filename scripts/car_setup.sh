@@ -27,11 +27,12 @@ if [ ! -d "$REPO/.git" ]; then
 else
   cd "$REPO"
   git fetch origin
+  BRANCH=$(git rev-parse --abbrev-ref HEAD)
   # The map and raceline are made on the car, then pushed from the Mac. Drop the car's local
   # copies only once GitHub has them, so the pull can bring them back.
   for f in fwc_pf/maps/track.pgm fwc_pf/maps/track.yaml fwc_controller/waypoints/track.csv; do
     if [ -e "$f" ] && ! git ls-files --error-unmatch "$f" >/dev/null 2>&1 \
-        && git cat-file -e "origin/main:$f" 2>/dev/null; then
+        && git cat-file -e "origin/$BRANCH:$f" 2>/dev/null; then
       rm "$f"
     fi
   done
@@ -39,10 +40,10 @@ else
     echo 'Local edits found; saving them with git stash (see: git stash list)'
     git stash
   fi
-  git pull --ff-only origin main
+  git pull --ff-only origin "$BRANCH"
 fi
 git config user.email 197832085+AbhilashSomigari@users.noreply.github.com
-echo "Code version: $(git describe --tags --always)"
+echo "Code version: $(git describe --tags --always) on $(git rev-parse --abbrev-ref HEAD)"
 
 echo '== 4/4 build'
 cd "$WS"

@@ -25,6 +25,8 @@ Every pose update:
   7. confident_speed + limit_rise - (adaptive configs only) blend the
      profile speed down towards a slow speed as localization confidence
      drops; confidence may fall at once but only rises at a limited rate.
+
+PurePursuit puts 4-7 together; the ROS node and the tests both use it.
 """
 
 import math
@@ -223,3 +225,57 @@ def yaw_from_quaternion(qx, qy, qz, qw):
     siny_cosp = 2.0 * (qw * qz + qx * qy)
     cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
     return math.atan2(siny_cosp, cosy_cosp)
+
+
+class PurePursuit:
+    """Steering and speed for one pose, from a prepared path and its speeds.
+
+    Parameters are the controller's ROS parameters (config/experiment.yaml).
+    """
+
+    def __init__(self, path, speeds, lookahead_distance=0.9,
+                 lookahead_speed_gain=0.05, wheelbase=0.3302,
+                 max_steering=0.4189, speed_scale=1.0, search_window=100,
+                 adaptive_speed=False, conf_min_speed=0.8,
+                 conf_rise_rate=0.5, lookahead_conf_gain=0.3):
+        self.path = path
+        self.speeds = speeds
+        self.lookahead_distance = lookahead_distance
+        self.lookahead_speed_gain = lookahead_speed_gain
+        self.wheelbase = wheelbase
+        self.max_steering = max_steering
+        self.speed_scale = speed_scale
+        self.search_window = search_window
+        self.adaptive_speed = adaptive_speed
+        self.conf_min_speed = conf_min_speed
+        self.conf_rise_rate = conf_rise_rate
+        self.lookahead_conf_gain = lookahead_conf_gain
+        self.index = None
+        # the confidence actually used starts at 0, so the car pulls away
+        # slowly and ramps up
+        self.confidence = 0.0
+
+    def step(self, x, y, yaw, speed, confidence, dt):
+        """Return (steering angle, speed command, goal point).
+
+        speed = current speed (m/s), confidence = latest 0..1 value, or None
+        when there is none or it is stale (counts as 0), dt = time since the
+        last step (s). Confidence is ignored unless adaptive_speed is on.
+        """
+        self.index = nearest_index(self.path, x, y, self.index,
+                                   self.search_window)
+        command = self.speed_scale * float(self.speeds[self.index])
+        lookahead = (self.lookahead_distance
+                     + self.lookahead_speed_gain * abs(speed))
+        if self.adaptive_speed:
+            target = 0.0 if confidence is None else confidence
+            self.confidence = limit_rise(self.confidence, target,
+                                         self.conf_rise_rate * dt)
+            command = confident_speed(command, self.confidence,
+                                      self.conf_min_speed)
+            lookahead += self.lookahead_conf_gain * (1.0 - self.confidence)
+        goal, _ = lookahead_point(self.path, x, y, self.index, lookahead)
+        local_x, local_y = to_vehicle_frame(goal, x, y, yaw)
+        angle = steering_angle(local_x, local_y, self.wheelbase,
+                               self.max_steering)
+        return angle, command, goal

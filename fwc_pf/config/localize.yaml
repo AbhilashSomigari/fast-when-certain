@@ -3,33 +3,29 @@ particle_filter:
     # topic names
     scan_topic: '/scan'
     odometry_topic: '/odom'
-    # range data downsampling
+    # use every angle_step-th lidar beam
     angle_step: 18
     max_particles: 2000
     squash_factor: 2.2
     # visualization
-    viz: 1
+    viz: true
     max_viz_particles: 60
     # ray casting method: 'cddt' runs on the CPU (no CUDA build needed);
     # 'rmgpu' is faster but needs range_libc built WITH_CUDA=ON
     range_method: 'cddt'
     theta_discretization: 112
-    # range data filtering
-    max_range: 10
-    fine_timing: 0
-    publish_odom: 1
-    # sensor model constants
+    # longer ranges count as max range (m)
+    max_range: 10.0
+    # sensor model constants (sigma_hit in map cells)
     z_short: 0.01
     z_max: 0.07
     z_rand: 0.12
     z_hit: 0.75
     sigma_hit: 8.0
-    # motion model dispersion constants
+    # motion model noise per update (m, m, rad), in the map frame
     motion_dispersion_x: 0.05
     motion_dispersion_y: 0.025
     motion_dispersion_theta: 0.25
-    # sensor model variant, variant 2 works for cddt and rmgpu, 3 doesn't work for rmgpu
-    rangelib_variant: 2
 
 map_server:
   ros__parameters:

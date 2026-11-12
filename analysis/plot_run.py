@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plot one run: the filter's path over the map, and the 3 confidence signals over time.
+Plot one run: the filter's path over the map, and the 3 /pf/stats values over time.
 
 Usage: python3 plot_run.py <csv_dir> [map.yaml]
   csv_dir  - output of scripts/bag_to_csv.py (needs pose.csv, stats.csv)
@@ -77,7 +77,7 @@ def main():
     ax.legend(loc='upper right')
     ax.set_title(os.path.basename(csv_dir.rstrip('/')))
 
-    signals = [('spread', 'spread (m)'), ('ess', 'ESS / N'), ('match', 'match (log)')]
+    signals = [('inlier', 'inlier ratio'), ('spread', 'spread (m)'), ('ess', 'ESS / N')]
     for row, (name, label) in enumerate(signals):
         sax = fig.add_subplot(grid[row, 1])
         sax.plot(stats['t'], stats[name], lw=0.8, color='tab:orange')

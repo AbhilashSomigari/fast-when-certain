@@ -35,7 +35,7 @@ TOPICS = {
     '/pf/pose/odom': ('pose.csv', ['x', 'y', 'yaw', 'speed'], odom_row),
     '/odom': ('odom.csv', ['x', 'y', 'yaw', 'speed'], odom_row),
     '/odometry/filtered': ('ekf.csv', ['x', 'y', 'yaw', 'speed'], odom_row),
-    '/pf/stats': ('stats.csv', ['spread', 'ess', 'match'], lambda m: list(m.data)),
+    '/pf/stats': ('stats.csv', ['inlier', 'spread', 'ess'], lambda m: list(m.data)),
     '/pf/confidence': ('confidence.csv', ['confidence'], lambda m: [m.data]),
     '/drive': ('drive.csv', ['speed', 'steer'], drive_row),
     '/teleop': ('teleop.csv', ['speed', 'steer'], drive_row),

@@ -14,9 +14,9 @@ Usage:
 
 Default mode prints one row per bag and per (config, speed), writes results.csv and
 failure_rate.png next to the first csv_dir.
---signals: for every failure, how the 3 /pf/stats signals behaved in the seconds before
-it versus on clean laps, and suggested confidence_signal / conf_low / conf_high values.
-Writes signals.png.
+--signals: for every failure, how the 3 /pf/stats values (inlier, spread, ess) behaved in
+the seconds before it versus on clean laps, and suggested conf_low / conf_high for the
+inlier ratio, the confidence signal. Writes signals.png.
 
 Rules (match docs/run_log.md):
   lap       - one pass of the raceline index from start to end (the raceline starts at
@@ -49,8 +49,8 @@ from fwc_controller import pure_pursuit as pp  # noqa: E402
 CONFIGS = ['baseline', 'noise', 'speed', 'both']
 COLORS = {'baseline': '#2a78d6', 'noise': '#eb6834', 'speed': '#1baf7a', 'both': '#eda100'}
 MARKERS = {'baseline': 'o', 'noise': 's', 'speed': '^', 'both': 'D'}
-SIGNALS = ['spread', 'ess', 'match']
-WORSE_WHEN_HIGH = {'spread': True, 'ess': False, 'match': False}
+SIGNALS = ['inlier', 'spread', 'ess']
+WORSE_WHEN_HIGH = {'inlier': False, 'spread': True, 'ess': False}
 
 JUMP_M = 0.5            # pose jump between two filter messages that counts as a failure
 TAKEOVER_SPEED = 0.3    # m/s; a /teleop burst starting faster than this is a takeover
@@ -342,7 +342,7 @@ def signals(path, csv_dirs):
     print('%d failures. Pre-failure window: %.1f-%.1f s before each one.\n'
           % (len(traces), PRE_FAILURE_S[0], PRE_FAILURE_S[1]))
     print('signal  separation  lead_time_s  suggested yaml')
-    best = None
+    suggested = None
     for s in SIGNALS:
         sign = 1.0 if WORSE_WHEN_HIGH[s] else -1.0
         good = sign * np.concatenate(clean[s])
@@ -362,10 +362,12 @@ def signals(path, csv_dirs):
         lo, hi = sorted([sign * alarm, sign * fail])
         print('%-7s %10.2f  %11.2f  conf_low: %.4g, conf_high: %.4g'
               % (s, sep, np.median(leads), lo, hi))
-        if best is None or sep > best[1]:
-            best = (s, sep, lo, hi)
-    print('\nSuggested (best separation): confidence_signal: %r, conf_low: %.4g, conf_high: %.4g'
-          % (best[0], best[2], best[3]))
+        if s == 'inlier':
+            suggested = (lo, hi)
+    print('\nSuggested for config/experiment.yaml: conf_low: %.3g, conf_high: %.3g'
+          % suggested)
+    print('(conf_high = inlier ratio that 95% of clean-lap samples beat, conf_low = median '
+          'inlier ratio just before failures)')
     print('Separation 0.5 = no better than chance, 1.0 = perfect. '
           'Prefer a signal with lead time > 0.5 s.')
 

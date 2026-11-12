@@ -679,7 +679,12 @@ class ParticleFiler(Node):
     
     def expected_pose(self):
         # returns the expected value of the pose given the particle distribution
-        return np.dot(self.particles.transpose(), self.weights)
+        pose = np.dot(self.particles.transpose(), self.weights)
+        # circular mean for the heading: after a global init, particles facing the same way can
+        # hold angles near 0 and near 2 pi, and their plain mean would point the opposite way
+        pose[2] = np.arctan2(np.dot(np.sin(self.particles[:,2]), self.weights),
+                             np.dot(np.cos(self.particles[:,2]), self.weights))
+        return pose
 
     def compute_stats(self):
         '''

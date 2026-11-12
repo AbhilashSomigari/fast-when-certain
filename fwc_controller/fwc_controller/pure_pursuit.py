@@ -15,7 +15,8 @@ Path preparation (once, at start-up):
 
 Every pose update:
   4. nearest_index    - closest waypoint, searched in a window ahead of the
-                        previous one (global search on the first call).
+                        previous one (global search on the first call,
+                        and again whenever that is > 1 m off).
   5. lookahead_point  - first point along the path, going forward from the
                         nearest waypoint, at exactly distance L from the car
                         (circle / segment intersection).
@@ -135,20 +136,25 @@ def speed_profile(path, max_speed, min_speed, max_lateral_accel, max_decel):
     return v
 
 
-def nearest_index(path, x, y, prev=None, window=100):
+def nearest_index(path, x, y, prev=None, window=100, reacquire=1.0):
     """Index of the waypoint closest to (x, y).
 
     With `prev` given, only waypoints from a few steps behind `prev` to
     `window` steps ahead of it are searched, so the car can never jump to
     a part of the track that is close in space but far along the path.
+    If even the best of those is more than `reacquire` m away (the pose
+    jumped: lost localization, or a new 2D Pose Estimate), the whole path
+    is searched again.
     """
     n = len(path)
-    if prev is None:
-        idx = np.arange(n)
-    else:
+    if prev is not None:
         idx = np.arange(prev - 5, prev + window) % n
-    d2 = (path[idx, 0] - x) ** 2 + (path[idx, 1] - y) ** 2
-    return int(idx[np.argmin(d2)])
+        d2 = (path[idx, 0] - x) ** 2 + (path[idx, 1] - y) ** 2
+        best = int(np.argmin(d2))
+        if d2[best] <= reacquire ** 2:
+            return int(idx[best])
+    d2 = (path[:, 0] - x) ** 2 + (path[:, 1] - y) ** 2
+    return int(np.argmin(d2))
 
 
 def lookahead_point(path, x, y, start, lookahead):

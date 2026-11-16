@@ -14,6 +14,8 @@ K=$2
 shift 2
 OUT=${BAG}_replay_k$K
 HERE=$(dirname "$(realpath "$0")")
+# metadata.yaml is written when the recorder exits cleanly; without it ros2 bag play fails
+[ -f "$BAG/metadata.yaml" ] || { echo "$BAG has no metadata.yaml: record it again and stop with one Ctrl+C"; exit 1; }
 rm -rf "$OUT" "${OUT}_csv"
 
 ros2 launch fwc_controller experiment_launch.py config:=noise replay:=true \

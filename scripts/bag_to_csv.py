@@ -5,14 +5,16 @@ Convert one rosbag2 recording into CSV files, one per topic.
 Usage: python3 bag_to_csv.py ~/bags/1030_1415_slow_test
 Writes ~/bags/1030_1415_slow_test_csv/{pose,stats,drive,...}.csv.
 Column t is the bag receive time in seconds since the first message.
+Reads the bag's sqlite3 files directly: Foxy has no rosbag2_py.
 """
 
 import csv
+import glob
 import math
 import os
+import sqlite3
 import sys
 
-import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
@@ -45,6 +47,24 @@ for _topic in ['/pf/pose/odom', '/pf/stats', '/pf/confidence']:
     TOPICS['/replay' + _topic] = TOPICS[_topic]
 
 
+def read_bag(bag):
+    """(topic, type, serialized data, receive time in ns) of the TOPICS messages, in time order."""
+    files = sorted(glob.glob(os.path.join(bag, '*.db3')))
+    if not files or not os.path.exists(os.path.join(bag, 'metadata.yaml')):
+        sys.exit('%s is not a finished bag (no .db3 or metadata.yaml): was the recording '
+                 'stopped with a single Ctrl+C?' % bag)
+    query = ('SELECT t.name, t.type, m.data, m.timestamp FROM messages m '
+             'JOIN topics t ON m.topic_id = t.id WHERE t.name IN (%s)'
+             % ','.join('?' * len(TOPICS)))
+    rows = []
+    for path in files:
+        db = sqlite3.connect('file:%s?mode=ro' % path, uri=True)
+        rows += db.execute(query, list(TOPICS)).fetchall()
+        db.close()
+    rows.sort(key=lambda r: r[3])
+    return rows
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
@@ -52,10 +72,8 @@ def main():
     out_dir = bag + '_csv'
     os.makedirs(out_dir, exist_ok=True)
 
-    reader = rosbag2_py.SequentialReader()
-    reader.open(rosbag2_py.StorageOptions(uri=bag, storage_id='sqlite3'),
-                rosbag2_py.ConverterOptions('cdr', 'cdr'))
-    types = {t.name: t.type for t in reader.get_all_topics_and_types()}
+    messages = read_bag(bag)
+    types = {topic: type_name for topic, type_name, _, _ in messages}
 
     files, writers, counts = {}, {}, {}
     for topic, (name, columns, _) in TOPICS.items():
@@ -66,8 +84,7 @@ def main():
             counts[topic] = 0
 
     t0 = None
-    while reader.has_next():
-        topic, data, stamp = reader.read_next()
+    for topic, _, data, stamp in messages:
         if topic not in writers:
             continue
         t0 = stamp if t0 is None else t0

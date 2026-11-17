@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Plot one run: the filter's path over the map, and the 3 /pf/stats values over time.
+Plot one run: the filter's path over the map, and the 3 /pf/stats values over time
+(with /pf/confidence on the inlier panel when confidence.csv exists).
 
 Usage: python3 plot_run.py <csv_dir> [map.yaml]
   csv_dir  - output of scripts/bag_to_csv.py (needs pose.csv, stats.csv)
@@ -59,6 +60,8 @@ def main():
     csv_dir = os.path.expanduser(sys.argv[1])
     pose = read_csv(os.path.join(csv_dir, 'pose.csv'))
     stats = read_csv(os.path.join(csv_dir, 'stats.csv'))
+    conf_path = os.path.join(csv_dir, 'confidence.csv')
+    conf = read_csv(conf_path) if os.path.exists(conf_path) else None
 
     fig = plt.figure(figsize=(13, 6))
     grid = fig.add_gridspec(3, 2, width_ratios=[1.1, 1])
@@ -80,7 +83,13 @@ def main():
     signals = [('inlier', 'inlier ratio'), ('spread', 'spread (m)'), ('ess', 'ESS / N')]
     for row, (name, label) in enumerate(signals):
         sax = fig.add_subplot(grid[row, 1])
-        sax.plot(stats['t'], stats[name], lw=0.8, color='tab:orange')
+        sax.plot(stats['t'], stats[name], lw=0.8, color='tab:orange', label=label)
+        if name == 'inlier' and conf is not None:
+            sax.plot(conf['t'], conf['confidence'], lw=0.8, color='tab:purple',
+                     label='confidence')
+            sax.set_ylim(-0.05, 1.05)
+            sax.legend(loc='lower right')
+            label = 'inlier / confidence'
         sax.set_ylabel(label)
         sax.grid(alpha=0.3)
         if row < 2:

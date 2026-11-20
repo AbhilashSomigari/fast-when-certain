@@ -1,7 +1,8 @@
 #!/bin/bash
 # One-command setup on the car (or the VM): dependencies, range_libc (CPU version), this repo,
 # then build. Safe to rerun: steps that are already done are skipped, and an existing clone is
-# updated to the latest pushed version.
+# updated to the latest pushed version. A copy without git (unpacked from a USB stick) is
+# built as it is; its VERSION file, if any, names the commit.
 # Usage: bash car_setup.sh [workspace]       default ~/f1tenth_ws (in the VM: ~/sim_ws)
 set -e
 WS=${1:-$HOME/f1tenth_ws}
@@ -21,7 +22,11 @@ fi
 
 echo '== 3/4 fast-when-certain'
 mkdir -p "$WS/src"
-if [ ! -d "$REPO/.git" ]; then
+if [ -d "$REPO" ] && [ ! -d "$REPO/.git" ]; then
+  # a copy without git (e.g. unpacked from a USB stick): build it as it is
+  cd "$REPO"
+  echo "Code version: $(cat VERSION 2>/dev/null || echo unknown) (copied, no git)"
+elif [ ! -d "$REPO/.git" ]; then
   git clone "$URL" "$REPO"
   cd "$REPO"
 else
@@ -42,8 +47,10 @@ else
   fi
   git pull --ff-only origin "$BRANCH"
 fi
-git config user.email 197832085+AbhilashSomigari@users.noreply.github.com
-echo "Code version: $(git describe --tags --always) on $(git rev-parse --abbrev-ref HEAD)"
+if [ -d .git ]; then
+  git config user.email 197832085+AbhilashSomigari@users.noreply.github.com
+  echo "Code version: $(git describe --tags --always) on $(git rev-parse --abbrev-ref HEAD)"
+fi
 
 echo '== 4/4 build'
 cd "$WS"

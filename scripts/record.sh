@@ -10,4 +10,5 @@ fi
 mkdir -p ~/bags
 ros2 bag record -o ~/bags/"$(date +%m%d_%H%M)_$1" \
   /scan /odom /sensors/imu/raw /tf /tf_static /drive /teleop /initialpose \
-  /pf/pose/odom /pf/stats /pf/confidence /odometry/filtered
+  /pf/pose/odom /pf/stats /pf/confidence /odometry/filtered \
+  /controller/mode /controller/offset

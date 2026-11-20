@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
 """
-Pure pursuit on the particle filter pose, with optional confidence-aware speed.
+Pure pursuit on the particle filter pose, with optional confidence-aware speed,
+and follow the gap around obstacles that aren't in the map.
 
 On start-up the waypoint CSV is cleaned, cut to one lap, resampled, smoothed
 and given a speed profile (pure_pursuit.prepare_path, speed_profile). Every
-pose on /pf/pose/odom goes through pure_pursuit.PurePursuit.step and out as
-an AckermannDriveStamped on /drive. No pose, no drive command: the filter
-publishes nothing until it has a 2D Pose Estimate.
+pose on /pf/pose/odom goes through pure_pursuit.PurePursuit.step. No pose, no
+drive command: the filter publishes nothing until it has a 2D Pose Estimate.
 
 With adaptive_speed on, the latest /pf/confidence is used; if it is older
 than conf_timeout it counts as 0.
+
+With avoid on (avoid.Driver), every /scan is checked for obstacles on the
+raceline ahead (the map comes from /map_server/map, like the filter's):
+  mode TRACK  - pure pursuit's command goes out on /drive (on every pose)
+  mode AVOID  - gap follow's command goes out on /drive (on every scan)
+  mode FOLLOW - pure pursuit steers, at most the speed that keeps the gap to
+                the other car (on every pose)
+In every mode the speed is 0 while the time-to-collision brake is on.
+Published: /controller/mode (Int8, 0 TRACK / 1 AVOID / 2 FOLLOW),
+/controller/offset (Float32, m from the raceline), on /dynamic_viz: obstacle
+points (id 2, orange) and the other car's predicted points (id 3, magenta).
 """
 
 import os
@@ -18,12 +29,19 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Odometry
+from nav_msgs.srv import GetMap
+import numpy as np
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32, Int8
 from visualization_msgs.msg import Marker
 
+from fwc_controller import avoid
+from fwc_controller import gap_follow
 from fwc_controller import pure_pursuit as pp
+
+MODES = {avoid.TRACK: 'TRACK', avoid.AVOID: 'AVOID', avoid.FOLLOW: 'FOLLOW'}
 
 PARAMS = {
     'odom_topic': '/pf/pose/odom',
@@ -48,7 +66,11 @@ PARAMS = {
     'conf_rise_rate': 0.5,
     'conf_timeout': 0.5,
     'lookahead_conf_gain': 0.3,
+    'scan_topic': '/scan',
+    'avoid': False,
 }
+PARAMS.update(avoid.DEFAULTS)
+PARAMS.update({'gap_' + k: v for k, v in gap_follow.DEFAULTS.items()})
 
 
 class Controller(Node):
@@ -83,6 +105,11 @@ class Controller(Node):
         self.confidence = None
         self.confidence_time = None
         self.last_pose_time = None
+        self.pose = None              # latest laser pose (x, y, yaw) and speed
+        self.speed = 0.0
+        self.goal = None
+        self.steering = 0.0
+        self.mode = avoid.TRACK
 
         self.pub_drive = self.create_publisher(
             AckermannDriveStamped, p['drive_topic'], 10)
@@ -94,11 +121,39 @@ class Controller(Node):
         if p['adaptive_speed']:
             self.create_subscription(
                 Float32, p['confidence_topic'], self.confidence_callback, 10)
+        self.driver = None
+        if p['avoid']:
+            avoid_params, gap_params = avoid.split_params(p)
+            self.driver = avoid.Driver(path, self.load_wall_mask(),
+                                       gap_follow.GapFollow(**gap_params),
+                                       **avoid_params)
+            self.pub_mode = self.create_publisher(Int8, '/controller/mode', 10)
+            self.pub_offset = self.create_publisher(
+                Float32, '/controller/offset', 10)
+            self.create_subscription(
+                LaserScan, p['scan_topic'], self.scan_callback, 10)
+            self.get_logger().info('Obstacle avoidance on (follow the gap)')
 
         self.path_marker = self.make_marker(0, 0.1, (0.0, 0.0, 1.0))
         self.path_marker.points = [
             Point(x=float(x), y=float(y), z=0.0) for x, y in path]
         self.create_timer(1.0, self.publish_path)
+
+    def load_wall_mask(self):
+        """The map's walls, from the map server (as the filter loads it)."""
+        client = self.create_client(GetMap, '/map_server/map')
+        while not client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for the map server...')
+        future = client.call_async(GetMap.Request())
+        rclpy.spin_until_future_complete(self, future)
+        grid = future.result().map
+        info = grid.info
+        q = info.origin.orientation
+        origin = (info.origin.position.x, info.origin.position.y,
+                  pp.yaw_from_quaternion(q.x, q.y, q.z, q.w))
+        occupied = avoid.occupied_from_grid(grid.data, info.width, info.height)
+        return avoid.WallMask(occupied, info.resolution, origin,
+                              self.p['wall_margin'])
 
     def confidence_callback(self, msg):
         self.confidence = float(msg.data)
@@ -119,20 +174,63 @@ class Controller(Node):
         pose = msg.pose.pose
         q = pose.orientation
         yaw = pp.yaw_from_quaternion(q.x, q.y, q.z, q.w)
+        self.speed = msg.twist.twist.linear.x
+        self.pose = (pose.position.x, pose.position.y, yaw)
         angle, speed, goal = self.pursuit.step(
             pose.position.x, pose.position.y, yaw,
-            msg.twist.twist.linear.x, self.fresh_confidence(now), dt)
+            self.speed, self.fresh_confidence(now), dt)
+        self.goal = goal
 
-        drive = AckermannDriveStamped()
-        drive.header.stamp = now.to_msg()
-        drive.drive.steering_angle = float(angle)
-        drive.drive.speed = float(speed)
-        self.pub_drive.publish(drive)
+        if self.mode == avoid.FOLLOW and self.driver.follow_speed is not None:
+            speed = min(speed, self.driver.follow_speed)
+        if self.mode != avoid.AVOID:
+            self.publish_drive(angle, speed, now)
+        if self.driver is not None:
+            near = self.pursuit.path[self.pursuit.index]
+            self.pub_offset.publish(Float32(data=float(np.hypot(
+                near[0] - pose.position.x, near[1] - pose.position.y))))
 
         marker = self.make_marker(1, 0.2, (1.0, 0.0, 0.0))
         marker.header.stamp = now.to_msg()
         marker.points = [Point(x=float(goal[0]), y=float(goal[1]), z=0.0)]
         self.pub_dynamic_viz.publish(marker)
+
+    def scan_callback(self, msg):
+        if self.pose is None:          # not localized yet: nothing drives
+            return
+        now = self.get_clock().now()
+        mode, command, points = self.driver.step(
+            now.nanoseconds * 1e-9, self.pose, self.pursuit.index, self.speed,
+            msg.ranges, msg.angle_min, msg.angle_increment, self.steering,
+            self.goal)
+        if mode != self.mode:
+            self.get_logger().info('mode %s -> %s' % (MODES[self.mode], MODES[mode]))
+        self.mode = mode
+        self.pub_mode.publish(Int8(data=int(self.mode)))
+        if self.mode == avoid.AVOID:
+            self.publish_drive(command[0], command[1], now)
+        elif self.driver.braking:
+            self.publish_drive(self.steering, 0.0, now)
+        marker = self.make_marker(2, 0.05, (1.0, 0.5, 0.0))
+        marker.header.stamp = now.to_msg()
+        marker.points = [Point(x=float(x), y=float(y), z=0.0)
+                         for x, y in points[::4]]
+        self.pub_dynamic_viz.publish(marker)
+        marker = self.make_marker(3, 0.05, (1.0, 0.0, 1.0))
+        marker.header.stamp = now.to_msg()
+        marker.points = [Point(x=float(x), y=float(y), z=0.0)
+                         for x, y in self.driver.predicted[::4]]
+        self.pub_dynamic_viz.publish(marker)
+
+    def publish_drive(self, steering, speed, now):
+        if self.driver is not None and self.driver.braking:
+            speed = 0.0
+        self.steering = float(steering)
+        drive = AckermannDriveStamped()
+        drive.header.stamp = now.to_msg()
+        drive.drive.steering_angle = float(steering)
+        drive.drive.speed = float(speed)
+        self.pub_drive.publish(drive)
 
     def make_marker(self, marker_id, scale, rgb):
         marker = Marker()

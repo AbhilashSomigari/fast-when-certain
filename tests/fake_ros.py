@@ -60,6 +60,7 @@ LaserScan = msg('LaserScan', header=Header, angle_min=0.0, angle_max=0.0, angle_
                 time_increment=0.0, scan_time=0.0, range_min=0.0, range_max=0.0,
                 ranges=list, intensities=list)
 Float32 = msg('Float32', data=0.0)
+Int8 = msg('Int8', data=0)
 Float32MultiArray = msg('Float32MultiArray', layout=None, data=list)
 MapMetaData = msg('MapMetaData', map_load_time=Time, resolution=0.0, width=0, height=0,
                   origin=Pose)
@@ -207,7 +208,7 @@ def install(world, repo):
     module('sensor_msgs')
     module('sensor_msgs.msg', LaserScan=LaserScan)
     module('std_msgs')
-    module('std_msgs.msg', Float32=Float32, Float32MultiArray=Float32MultiArray)
+    module('std_msgs.msg', Float32=Float32, Float32MultiArray=Float32MultiArray, Int8=Int8)
     module('tf2_ros', TransformBroadcaster=TransformBroadcaster)
     module('ackermann_msgs')
     module('ackermann_msgs.msg', AckermannDriveStamped=AckermannDriveStamped)

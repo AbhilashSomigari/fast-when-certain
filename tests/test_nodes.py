@@ -21,7 +21,7 @@ experiment_launch = importlib.import_module('experiment_launch')
 
 FULL_ANGLES = np.linspace(-2.35, 2.35, 1080)
 LAUNCH_DEFAULTS = {'config': 'baseline', 'speed_scale': '0.6', 'sim': 'false', 'replay': 'false',
-                   'waypoints': '', 'particles': '', 'noise_speed_gain': ''}
+                   'waypoints': '', 'particles': '', 'noise_speed_gain': '', 'avoid': ''}
 
 
 @pytest.fixture(autouse=True)
@@ -76,8 +76,9 @@ def test_replay_runs_the_filter_alone_on_replay_topics():
     assert ('/pf/stats', '/replay/pf/stats') in kw['remappings']
 
 
-def drive(launch_args, seconds, init_pose=True, rate=40.0):
-    """Run the launch file's two nodes on the bus with a simulated car. Returns the car pose."""
+def drive(launch_args, seconds, init_pose=True, rate=40.0, boxes=()):
+    """Run the launch file's two nodes on the bus with a simulated car (and boxes that aren't
+    in the map). Returns the car pose."""
     nodes = launch(**launch_args)
     for name in ('particle_filter', 'controller'):
         fake_ros.OVERRIDES[name] = nodes[name][0]
@@ -102,7 +103,10 @@ def drive(launch_args, seconds, init_pose=True, rate=40.0):
             fake_ros.BUS.publish('/initialpose', msg)
         scan = fake_ros.LaserScan(angle_min=-2.35, angle_max=2.35,
                                   angle_increment=4.7 / 1079, range_max=30.0)
-        scan.ranges = list(WORLD.raycast(car[None, :], FULL_ANGLES)[0])
+        ranges = WORLD.raycast(car[None, :], FULL_ANGLES)[0]
+        if boxes:
+            ranges = np.minimum(ranges, sim2d.rect_ranges(car, FULL_ANGLES, boxes))
+        scan.ranges = list(ranges)
         fake_ros.BUS.publish('/scan', scan)
         odom = fake_ros.Odometry()
         odom.header.stamp = fake_ros.CLOCK.now().to_msg()
@@ -136,3 +140,20 @@ def test_nodes_drive_the_car_along_the_raceline(config):
     assert log['/tf'][-1].child_frame_id == 'pf_laser'
     assert log['/pf/viz/scan'][-1].header.frame_id == 'pf_laser'
     assert any('iters per sec' in text for _, text in fake_ros.LOG)
+
+
+def test_controller_goes_round_a_box_and_back_to_pure_pursuit():
+    path = sim2d.load_path('track', sim2d.experiment_params()[1])[0]
+    box = (path[80, 0], path[80, 1], 0.3, 0.3, 0.3)          # 4 m along the raceline
+    car, _, ctl_node = drive({'config': 'both'}, 6.0, boxes=[box])
+    modes = [m.data for m in fake_ros.BUS.log['/controller/mode']]
+    assert 1 in modes and modes[-1] == 0                       # avoided, then back to TRACK
+    assert ctl_node.pursuit.index * 0.05 > 5.0                 # got past the box
+    assert fake_ros.BUS.log['/controller/offset'][-1].data < 0.3
+    assert not sim2d.inside(sim2d.outline(sim2d.car_rect(car)), box).any()
+
+
+def test_avoid_off_publishes_no_mode():
+    drive({'config': 'baseline', 'avoid': 'false'}, 1.0)
+    assert '/controller/mode' not in fake_ros.BUS.log
+    assert '/drive' in fake_ros.BUS.log

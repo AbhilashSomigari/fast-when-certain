@@ -41,6 +41,8 @@ TOPICS = {
     '/pf/confidence': ('confidence.csv', ['confidence'], lambda m: [m.data]),
     '/drive': ('drive.csv', ['speed', 'steer'], drive_row),
     '/teleop': ('teleop.csv', ['speed', 'steer'], drive_row),
+    '/controller/mode': ('mode.csv', ['mode'], lambda m: [m.data]),
+    '/controller/offset': ('offset.csv', ['offset'], lambda m: [m.data]),
 }
 # scripts/replay.sh records the filter's outputs under /replay/...; write them to the same files
 for _topic in ['/pf/pose/odom', '/pf/stats', '/pf/confidence']:

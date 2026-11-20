@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Plot one run: the filter's path over the map, and the 3 /pf/stats values over time
-(with /pf/confidence on the inlier panel when confidence.csv exists).
+(with /pf/confidence on the inlier panel when confidence.csv exists). With offset.csv and
+mode.csv (obstacle avoidance), a 4th panel: distance from the raceline, AVOID (red) and FOLLOW
+(green) periods shaded, which shows the car going round an obstacle and back onto the line.
 
 Usage: python3 plot_run.py <csv_dir> [map.yaml]
   csv_dir  - output of scripts/bag_to_csv.py (needs pose.csv, stats.csv)
@@ -63,8 +65,14 @@ def main():
     conf_path = os.path.join(csv_dir, 'confidence.csv')
     conf = read_csv(conf_path) if os.path.exists(conf_path) else None
 
-    fig = plt.figure(figsize=(13, 6))
-    grid = fig.add_gridspec(3, 2, width_ratios=[1.1, 1])
+    offset_path = os.path.join(csv_dir, 'offset.csv')
+    mode_path = os.path.join(csv_dir, 'mode.csv')
+    offset = read_csv(offset_path) if os.path.exists(offset_path) else None
+    mode = read_csv(mode_path) if os.path.exists(mode_path) else None
+    rows = 4 if offset is not None else 3
+
+    fig = plt.figure(figsize=(13, 2 * rows))
+    grid = fig.add_gridspec(rows, 2, width_ratios=[1.1, 1])
 
     ax = fig.add_subplot(grid[:, 0])
     if len(sys.argv) == 3:
@@ -92,8 +100,23 @@ def main():
             label = 'inlier / confidence'
         sax.set_ylabel(label)
         sax.grid(alpha=0.3)
-        if row < 2:
+        if row < rows - 1:
             sax.tick_params(labelbottom=False)
+    if offset is not None:
+        sax = fig.add_subplot(grid[3, 1])
+        sax.plot(offset['t'], offset['offset'], lw=0.8, color='tab:blue')
+        if mode is not None and np.size(mode['t']) > 1:
+            t, m = np.atleast_1d(mode['t']), np.atleast_1d(mode['mode'])
+            sax.fill_between(t, 0, 1, where=(m > 0.5) & (m < 1.5), step='post', alpha=0.2,
+                             color='tab:red', transform=sax.get_xaxis_transform(),
+                             label='AVOID')
+            if (m > 1.5).any():
+                sax.fill_between(t, 0, 1, where=m > 1.5, step='post', alpha=0.2,
+                                 color='tab:green', transform=sax.get_xaxis_transform(),
+                                 label='FOLLOW')
+            sax.legend(loc='upper right')
+        sax.set_ylabel('off raceline (m)')
+        sax.grid(alpha=0.3)
     sax.set_xlabel('time (s)')
 
     fig.tight_layout()

@@ -15,6 +15,8 @@ Args:
   particles    overrides max_particles (empty = localize.yaml)
   noise_speed_gain
                overrides k of the noise configs (empty = experiment.yaml)
+  avoid        true | false: follow the gap around obstacles that aren't in
+               the map (empty = experiment.yaml, which has it on)
   replay       true = filter + map server only, for scripts/replay.sh; the
                filter's outputs move to /replay/pf/... so they don't mix with
                the /pf/... messages played back from the bag
@@ -106,6 +108,8 @@ def launch_setup(context):
                 'speed_scale': speed_scale,
                 'adaptive_speed': adaptive_speed,
                 'waypoints': waypoints,
+                **({'avoid': arg('avoid').lower() == 'true'}
+                   if arg('avoid') else {}),
             }],
         ))
 
@@ -145,5 +149,6 @@ def generate_launch_description():
         DeclareLaunchArgument('particles', default_value=''),
         DeclareLaunchArgument('noise_speed_gain', default_value=''),
         DeclareLaunchArgument('replay', default_value='false'),
+        DeclareLaunchArgument('avoid', default_value=''),
         OpaqueFunction(function=launch_setup),
     ])

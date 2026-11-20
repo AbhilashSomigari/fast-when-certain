@@ -34,3 +34,54 @@ controller:
     conf_rise_rate: 0.5           # confidence may rise this much per second
     conf_timeout: 0.5             # older confidence counts as 0 (s)
     lookahead_conf_gain: 0.3      # extra lookahead at confidence 0 (m)
+    # obstacle avoidance (fwc_controller/avoid.py): TRACK = pure pursuit,
+    # AVOID = follow the gap while something off the map blocks the raceline
+    avoid: true
+    wall_margin: 0.25             # m: scan points this close to a map wall are the wall
+    corridor_half_width: 0.3      # m: half width of the raceline corridor
+    trigger_dist: 1.8             # m ahead along the raceline ...
+    trigger_time: 0.3             # ... + this many seconds at the current speed
+    exit_behind: 0.5              # m: to go back to TRACK, the corridor from this far behind
+                                  # the car to the trigger distance ahead must be clear ...
+    exit_time: 0.3                # s it must stay clear
+    memory_time: 1.5              # s obstacle points are remembered after last seen
+    curve_radius: 2.0             # m: just after a bend tighter than this (within curve_before),
+    curve_before: 1.5             # m  pass on the outside if it has outside_room
+    outside_room: 0.25            # m beside the obstacle, to the walls grown by wall_margin
+    new_obstacle: 1.0             # m further along than the last obstacle: choose the side again
+    min_points: 8                 # scan points that count as an obstacle
+    enter_scans: 2                # scans in a row before switching to AVOID
+    avoid_max_speed: 2.0          # m/s cap while avoiding
+    # the other car (avoid.py): an off-map object moving faster than moving_speed
+    cluster_dist: 0.3             # m between neighbouring points of one object
+    moving_speed: 0.4             # m/s
+    predict_time: 0.75            # s: its points are also placed where it will be this soon
+    pass_room: 0.3                # m beside it (to the grown walls) needed to overtake, else FOLLOW
+    room_scans: 10                # scans in a row with/without room before AVOID <-> FOLLOW
+    moving_margin: 0.12           # m kept from it while passing
+    exit_behind_moving: 1.0       # m behind us before going back to TRACK
+    follow_gap: 1.0               # m kept behind it in FOLLOW ...
+    follow_gain: 1.0              # ... speed = its speed + gain x (gap - follow_gap)
+    ttc_brake: 0.35               # s: time-to-collision brake, every mode
+    # follow the gap while avoiding (fwc_controller/gap_follow.py, gap-follow lab values)
+    gap_fov_deg: 70.0
+    gap_max_range: 6.0
+    gap_car_width: 0.31
+    gap_width_margin: 0.25        # m: arcs this much wider than the car are preferred (lab: 0.15)
+    gap_path_margin: 0.05         # m each side: the free path ahead that sets the speed
+    gap_disparity_threshold: 0.3
+    gap_bubble_radius: 0.2
+    gap_bubble_speed_gain: 0.03
+    gap_gap_threshold: 2.5
+    gap_best_point_window: 40
+    gap_arc_length: 0.8           # m of each candidate arc checked for room
+    gap_wheelbase: 0.3302
+    gap_rear_offset: 0.27         # m from the rear axle to the laser
+    gap_high_speed: 2.0
+    gap_low_speed: 1.0
+    gap_min_speed: 0.5            # m/s floor: stopping would leave it unable to turn
+    gap_corner_clearance: 0.55
+    gap_time_headway: 0.3
+    gap_stop_distance: 0.2        # m kept to whatever the chosen arc runs into
+    gap_steering_alpha: 0.6
+    gap_max_steering_step: 0.12
